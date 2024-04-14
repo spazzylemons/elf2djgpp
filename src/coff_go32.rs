@@ -218,6 +218,7 @@ impl Coff {
         &self,
         binary: &mut ElfStream<LittleEndian, S>,
         output: &mut T,
+        timestamp: bool,
     ) -> std::io::Result<()> {
         let mut writer = CoffWriter::new(output);
 
@@ -226,7 +227,7 @@ impl Coff {
             (CoffFileHeader::SIZE + CoffSectionHeader::SIZE * self.sections.len()) as u32;
 
         // Write the COFF headers
-        let file_header = CoffFileHeader::from_coff(self);
+        let file_header = CoffFileHeader::from_coff(self, timestamp);
         file_header.serialize(&mut writer)?;
         let mut expected_section_offsets = Vec::<usize>::with_capacity(self.sections.len());
         for section in &self.sections {

@@ -65,6 +65,9 @@ struct Args {
 
     #[arg(short = 'q', long = "quiet")]
     quiet: bool,
+
+    #[arg(short = 't', long = "timestamp", help = "Add timestamp to object")]
+    timestamp: bool,
 }
 
 fn main() {
@@ -89,7 +92,7 @@ fn main() {
 
     let (outf, tmp_path) = output_file(&args.output_obj);
     let mut writer = BufWriter::new(outf);
-    coff.write(&mut binary, &mut writer).unwrap_or_else(|e| {
+    coff.write(&mut binary, &mut writer, args.timestamp).unwrap_or_else(|e| {
         error!("Failed to write output file: {e}");
         process::exit(1);
     });

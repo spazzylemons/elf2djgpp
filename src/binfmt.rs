@@ -17,7 +17,7 @@ pub struct CoffFileHeader {
 }
 
 impl CoffFileHeader {
-    pub fn from_coff(coff: &Coff) -> Self {
+    pub fn from_coff(coff: &Coff, timestamp: bool) -> Self {
         // Calculate the size of this header and all the sections to find the offset of the
         // symbol table.
         let mut header_and_sections_len = Self::SIZE;
@@ -46,10 +46,14 @@ impl CoffFileHeader {
         Self {
             magic: COFF_MAGIC.clone(),
             num_sections: coff.sections.len() as u16,
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs() as u32,
+            timestamp: if timestamp {
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs() as u32
+                } else {
+                    0
+                },
             symbols_ptr: header_and_sections_len as u32,
             num_symbols: coff.symbols.len() as u32,
             opt_header_size: 0,
