@@ -10,6 +10,8 @@ use std::{fs, process};
 use clap::Parser;
 use elf::abi::{EM_386, SHN_XINDEX, SHT_NULL, SHT_REL, SHT_STRTAB, SHT_SYMTAB, SHT_SYMTAB_SHNDX};
 use elf::endian::LittleEndian;
+use elf::section::SectionHeader;
+use elf::string_table::StringTable;
 use elf::ElfStream;
 use simplelog::{LevelFilter, TermLogger};
 use tempfile::NamedTempFile;
@@ -162,18 +164,23 @@ fn output_file(path: &Option<PathBuf>) -> (File, Option<PathBuf>) {
     }
 }
 
-fn convert<S: Read + Seek>(mut binary: &mut ElfStream<LittleEndian, S>) -> Coff {
+fn convert<S: Read + Seek>(binary: &mut ElfStream<LittleEndian, S>) -> Coff {
     let mut coff = Coff::new();
 
     // Add all the sections
-    let sections = get_elf_sections_to_process(&mut binary);
-    for section in sections.values() {
+    let mut sections = HashMap::new();
+    let (section_headers, maybe_strtab) = binary
+        .section_headers_with_strtab()
+        .expect("Failed to read symbol table");
+    let strtab = maybe_strtab.expect("No string table found");
+    for (name, section) in get_elf_sections_to_process(section_headers, strtab) {
         coff.add_elf_section(
-            binary,
+            strtab,
             &section.section_header,
             section.elf_index,
             section.section_type,
         );
+        sections.insert(name, section);
     }
 
     // Add all the symbols
@@ -224,17 +231,14 @@ fn convert<S: Read + Seek>(mut binary: &mut ElfStream<LittleEndian, S>) -> Coff 
     coff
 }
 
-fn get_elf_sections_to_process<S: Read + Seek>(
-    binary: &mut ElfStream<LittleEndian, S>,
-) -> HashMap<String, ElfSectionToProcess> {
-    let (section_headers, maybe_strtab) = binary
-        .section_headers_with_strtab()
-        .expect("Failed to read symbol table");
-    let strtab = maybe_strtab.expect("No string table found");
+fn get_elf_sections_to_process<'a>(
+    section_headers: &'a Vec<SectionHeader>,
+    strtab: StringTable<'a>,
+) -> impl Iterator<Item = (String, ElfSectionToProcess)> + 'a {
     section_headers
         .iter()
         .enumerate()
-        .filter_map(|(elf_index, sh)| {
+        .filter_map(move |(elf_index, sh)| {
             if IGNORE_ELF_SECTION_TYPES.contains(&sh.sh_type) {
                 return None;
             }
@@ -261,7 +265,6 @@ fn get_elf_sections_to_process<S: Read + Seek>(
                 },
             ))
         })
-        .collect()
 }
 
 /// Parse the extended section indexes section (SHT_SYMTAB_SHNDX) if it exists.

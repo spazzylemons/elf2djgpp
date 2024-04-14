@@ -59,15 +59,6 @@ pub fn fix_extern_symbol(name: Cow<[u8]>) -> Cow<[u8]> {
     return name;
 }
 
-/// Helper to get the string table from an ElfStream, assuming it exists.  We have to do this in
-/// every new scope because borrow checker.
-fn get_strtab<S: Read + Seek>(
-    binary: &mut ElfStream<LittleEndian, S>,
-) -> elf::string_table::StringTable {
-    let (_, maybe_strtab) = binary.section_headers_with_strtab().unwrap();
-    maybe_strtab.unwrap()
-}
-
 pub struct Coff {
     pub sections: Vec<Rc<RefCell<Section>>>,
     pub symbols: Vec<Rc<RefCell<Symbol>>>,
@@ -89,16 +80,15 @@ impl Coff {
         }
     }
 
-    pub fn add_elf_section<S: Read + Seek>(
+    pub fn add_elf_section(
         &mut self,
-        binary: &mut ElfStream<LittleEndian, S>,
+        string_table: elf::string_table::StringTable,
         elf_section: &elf::section::SectionHeader,
         elf_section_index: usize,
         section_type: CoffSectionType,
     ) -> Rc<RefCell<Section>> {
         // Get the section name, optionally storing in our string table if it's too large
-        let elf_strtab = get_strtab(binary);
-        let section_name = elf_strtab
+        let section_name = string_table
             .get_raw(elf_section.sh_name as usize)
             .expect("No name found for section {section_index}");
         let name = if section_name.len() > MAX_NAME_LEN {
