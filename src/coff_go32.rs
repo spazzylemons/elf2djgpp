@@ -7,10 +7,8 @@ use elf::abi::{STB_GLOBAL, STB_LOCAL, STT_FILE, STT_FUNC, STT_NOTYPE, STT_OBJECT
 use elf::endian::LittleEndian;
 use elf::ElfStream;
 use std::borrow::Cow;
-use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::io::{Read, Seek, Write};
-use std::rc::Rc;
 
 /// Maximum size of short section/symbol names
 pub const MAX_NAME_LEN: usize = 8;
@@ -69,12 +67,12 @@ fn get_strtab<S: Read + Seek>(
 }
 
 pub struct Coff {
-    pub sections: Vec<Rc<RefCell<Section>>>,
-    pub symbols: Vec<Rc<RefCell<Symbol>>>,
+    pub sections: Vec<Section>,
+    pub symbols: Vec<Symbol>,
     pub strings: StringTable,
-    pub section_for_elf_index: BTreeMap<usize, Rc<RefCell<Section>>>,
-    pub section_for_elf_section_name: HashMap<Vec<u8>, Rc<RefCell<Section>>>,
-    pub symbol_for_elf_symbol_index: BTreeMap<usize, Rc<RefCell<Symbol>>>,
+    pub section_for_elf_index: BTreeMap<usize, usize>,
+    pub section_for_elf_section_name: HashMap<Vec<u8>, usize>,
+    pub symbol_for_elf_symbol_index: BTreeMap<usize, usize>,
 }
 
 impl Coff {
@@ -95,7 +93,7 @@ impl Coff {
         elf_section: &elf::section::SectionHeader,
         elf_section_index: usize,
         section_type: CoffSectionType,
-    ) -> Rc<RefCell<Section>> {
+    ) {
         // Get the section name, optionally storing in our string table if it's too large
         let elf_strtab = get_strtab(binary);
         let section_name = elf_strtab
@@ -108,8 +106,9 @@ impl Coff {
             Name::from_slice(section_name)
         };
 
-        let section_number = CoffSectionNumber::Index((self.sections.len() + 1).try_into().unwrap()); // section numbers are 1-based
-        let section = Rc::new(RefCell::new(Section {
+        let section_index = self.sections.len();
+        let section_number = CoffSectionNumber::Index((section_index + 1).try_into().unwrap()); // section numbers are 1-based
+        self.sections.push(Section {
             name,
             section_type,
             elf_section_index,
@@ -117,10 +116,9 @@ impl Coff {
             address: elf_section.sh_addr.try_into().unwrap(),
             size: elf_section.sh_size.try_into().unwrap(),
             relocations: vec![],
-        }));
-        self.sections.push(section.clone());
+        });
         self.section_for_elf_index
-            .insert(elf_section_index, section.clone());
+            .insert(elf_section_index, section_index);
         if self.section_for_elf_section_name.contains_key(section_name) {
             panic!(
                 "Attempted to add section {0:?} twice",
@@ -128,8 +126,7 @@ impl Coff {
             );
         }
         self.section_for_elf_section_name
-            .insert(section_name.to_vec(), section.clone());
-        section
+            .insert(section_name.to_vec(), section_index);
     }
 
     pub fn add_elf_symbol(
@@ -138,7 +135,7 @@ impl Coff {
         elf_symbol_index: usize,
         elf_strtab: &elf::string_table::StringTable,
         elf_section_numbers: &SectionNumberForSymbolIdx,
-    ) -> Option<Rc<RefCell<Symbol>>> {
+    ) {
         let name: Name;
         let section_number: CoffSectionNumber;
         let storage_class: SymbolStorageClass;
@@ -146,7 +143,7 @@ impl Coff {
         let elf_section_index = elf_section_numbers[elf_symbol_index];
         if elf_symbol.st_symtype() == elf::abi::STT_SECTION {
             // Special case: section symbols
-            let section = self.section_for_elf_index[&elf_section_index].borrow();
+            let section = &self.sections[self.section_for_elf_index[&elf_section_index]];
             name = section.name;
             section_number = section.number;
             storage_class = SymbolStorageClass::Static;
@@ -164,33 +161,31 @@ impl Coff {
             storage_class = SymbolStorageClass::for_elf_symbol(&elf_symbol);
             if self.strings.get_name(&name).is_empty() && elf_symbol.st_symtype() == STT_NOTYPE {
                 // COFF doesn't like this empty symbol, skip it
-                return None;
+                return;
             } else if elf_symbol.st_symtype() == STT_FILE {
                 section_number = CoffSectionNumber::Debugging;
             } else if elf_symbol.is_undefined() {
                 section_number = CoffSectionNumber::Extern;
-            } else if let Some(section) = self.section_for_elf_index.get(&elf_section_index) {
-                section_number = section.borrow().number;
+            } else if let Some(&section) = self.section_for_elf_index.get(&elf_section_index) {
+                section_number = self.sections[section].number;
             } else {
                 warn!(
                     "Skipping symbol {} from skipped section",
                     String::from_utf8_lossy(strtab_ent)
                 );
-                return None;
+                return;
             }
         }
 
-        let symbol = Rc::new(RefCell::new(Symbol {
+        let symbol_index = self.symbols.len();
+        self.symbol_for_elf_symbol_index
+            .insert(elf_symbol_index, symbol_index);
+        self.symbols.push(Symbol {
             name,
             value: elf_symbol.st_value.try_into().unwrap(),
             section_number,
             storage_class,
-            index: self.symbols.len(),
-        }));
-        self.symbol_for_elf_symbol_index
-            .insert(elf_symbol_index, symbol.clone());
-        self.symbols.push(symbol.clone());
-        return Some(symbol);
+        });
     }
 
     pub fn add_relocation(
@@ -198,7 +193,7 @@ impl Coff {
         elf_relocation: elf::relocation::Rel,
         elf_section_index: usize,
     ) {
-        let symbol = self
+        let &symbol = self
             .symbol_for_elf_symbol_index
             .get(&(elf_relocation.r_sym.try_into().unwrap()))
             .unwrap();
@@ -216,10 +211,11 @@ impl Coff {
             ),
             _ => panic!("Unknown relocation type {}", elf_relocation.r_type),
         };
-        let section = self.section_for_elf_index.get(&elf_section_index).unwrap();
-        section.borrow_mut().relocations.push(Relocation {
+        let section = &mut self
+            .sections[*self.section_for_elf_index.get(&elf_section_index).unwrap()];
+        section.relocations.push(Relocation {
             address: elf_relocation.r_offset.try_into().unwrap(),
-            symbol: symbol.clone(),
+            symbol,
             relocation_type,
         });
     }
@@ -240,7 +236,6 @@ impl Coff {
         file_header.serialize(&mut writer)?;
         let mut expected_section_offsets = Vec::<usize>::with_capacity(self.sections.len());
         for section in &self.sections {
-            let section = section.borrow();
             let section_header = CoffSectionHeader::from_section(&section, data_offset);
             section_header.serialize(&mut writer)?;
             expected_section_offsets.push(data_offset.try_into().unwrap());
@@ -256,7 +251,6 @@ impl Coff {
         let elf_sections = binary.section_headers().clone();
         for (i, section) in self.sections.iter().enumerate() {
             assert_eq!(expected_section_offsets[i], writer.pos());
-            let section = section.borrow();
             let elf_sh = elf_sections.get(section.elf_section_index).unwrap();
             let (data, compression) = binary.section_data(elf_sh).unwrap_or_else(|_| {
                 let name = self.strings.get_name(&section.name);
@@ -293,7 +287,7 @@ impl Coff {
 
         // Write the symbol table after all the sections
         for symbol in &self.symbols {
-            let symbol_data = CoffSymbol::from_symbol(&symbol.borrow());
+            let symbol_data = CoffSymbol::from_symbol(&symbol);
             symbol_data.serialize(&mut writer)?;
         }
 
@@ -389,7 +383,7 @@ pub enum CoffSectionType {
 
 pub struct Relocation {
     pub address: u32,
-    pub symbol: Rc<RefCell<Symbol>>,
+    pub symbol: usize,
     pub relocation_type: CoffRelocationType,
 }
 
@@ -398,7 +392,6 @@ pub struct Symbol {
     pub value: u32,
     pub section_number: CoffSectionNumber,
     pub storage_class: SymbolStorageClass,
-    pub index: usize,
 }
 
 #[repr(u8)]

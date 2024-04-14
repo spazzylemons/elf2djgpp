@@ -22,7 +22,6 @@ impl CoffFileHeader {
         // symbol table.
         let mut header_and_sections_len = Self::SIZE;
         for section in coff.sections.iter() {
-            let section = section.borrow();
             header_and_sections_len += CoffSectionHeader::SIZE;
             header_and_sections_len += usize::try_from(section.size_on_disk()).unwrap();
             header_and_sections_len += CoffRelocation::SIZE * section.relocations.len();
@@ -37,7 +36,7 @@ impl CoffFileHeader {
         if coff
             .sections
             .iter()
-            .find(|s| !s.borrow().relocations.len() > 0)
+            .find(|s| !s.relocations.len() > 0)
             .is_none()
         {
             flags |= CoffFileFlags::RelocsStripped;
@@ -204,7 +203,7 @@ impl CoffRelocation {
     pub fn from_relocation(reloc: &Relocation) -> Self {
         Self {
             address: reloc.address,
-            symbol_idx: reloc.symbol.borrow().index.try_into().unwrap(),
+            symbol_idx: reloc.symbol.try_into().unwrap(),
             relocation_type: reloc.relocation_type as _,
         }
     }

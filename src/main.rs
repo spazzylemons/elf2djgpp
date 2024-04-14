@@ -215,12 +215,11 @@ fn convert<S: Read + Seek>(mut binary: &mut ElfStream<LittleEndian, S>) -> Coff 
         }
 
         // Sort the rels by address, since we'll be processing them as we copy the data
-        coff.section_for_elf_index
+        let section_index = *coff.section_for_elf_index
             .get(&target_section.elf_index)
-            .unwrap()
-            .borrow_mut()
-            .relocations
-            .sort_by_key(|r| r.address);
+            .unwrap();
+        let section = &mut coff.sections[section_index];
+        section.relocations.sort_by_key(|r| r.address);
     }
     coff
 }
