@@ -90,13 +90,13 @@ pub struct CoffSectionHeader {
 
 impl CoffSectionHeader {
     pub fn from_section(section: &Section, raw_data_offset: u32) -> Self {
-        let name = match section.name {
-            Name::Literal(s) => s,
-            Name::StringTableIndex(idx) => {
-                let mut buf = [0u8; MAX_NAME_LEN];
-                write!(&mut buf[..], "/{idx}").unwrap();
-                buf
-            }
+        // DJGPP seems to ignore the flags, at least for BSS, and instead use the
+        // section header name to determine how to link.
+        let name = *match section.section_type {
+            CoffSectionType::Unknown => b".unknown",
+            CoffSectionType::Text => b".text\0\0\0",
+            CoffSectionType::Data => b".data\0\0\0",
+            CoffSectionType::Bss => b".bss\0\0\0\0",
         };
 
         let raw_data_ptr = if section.size > 0 { raw_data_offset } else { 0 };
