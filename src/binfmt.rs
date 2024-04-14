@@ -228,14 +228,6 @@ pub trait CoffSerialize {
     fn serialize<W: Write>(&self, serializer: &mut CoffWriter<W>) -> Result<usize>;
 }
 
-pub trait CoffSerializer {
-    fn write_chars(&mut self, chars: &[u8]) -> Result<usize>;
-    fn write_i16(&mut self, value: &i16) -> Result<usize>;
-    fn write_u8(&mut self, value: &u8) -> Result<usize>;
-    fn write_u16(&mut self, value: &u16) -> Result<usize>;
-    fn write_u32(&mut self, value: &u32) -> Result<usize>;
-}
-
 pub struct CoffWriter<W: Write> {
     writer: W,
     pos: usize,
