@@ -99,7 +99,7 @@ impl Coff {
         // Get the section name, optionally storing in our string table if it's too large
         let elf_strtab = get_strtab(binary);
         let section_name = elf_strtab
-            .get_raw(elf_section.sh_name as usize)
+            .get_raw(elf_section.sh_name.try_into().unwrap())
             .expect("No name found for section {section_index}");
         let name = if section_name.len() > MAX_NAME_LEN {
             let offset = self.strings.add(section_name);
@@ -108,14 +108,14 @@ impl Coff {
             Name::from_slice(section_name)
         };
 
-        let section_number = CoffSectionNumber::Index((self.sections.len() + 1) as i16); // section numbers are 1-based
+        let section_number = CoffSectionNumber::Index((self.sections.len() + 1).try_into().unwrap()); // section numbers are 1-based
         let section = Rc::new(RefCell::new(Section {
             name,
             section_type,
             elf_section_index,
             number: section_number,
-            address: elf_section.sh_addr as u32,
-            size: elf_section.sh_size as u32,
+            address: elf_section.sh_addr.try_into().unwrap(),
+            size: elf_section.sh_size.try_into().unwrap(),
             relocations: vec![],
         }));
         self.sections.push(section.clone());
@@ -153,7 +153,7 @@ impl Coff {
         } else {
             // Normal case: every other kind of symbol
             let strtab_ent = elf_strtab
-                .get_raw(elf_symbol.st_name as usize)
+                .get_raw(elf_symbol.st_name.try_into().unwrap())
                 .unwrap_or_else(|_| {
                     panic!(
                         "No name found for symbol {elf_symbol_index} (st_name {0})",
@@ -182,7 +182,7 @@ impl Coff {
 
         let symbol = Rc::new(RefCell::new(Symbol {
             name,
-            value: elf_symbol.st_value as u32,
+            value: elf_symbol.st_value.try_into().unwrap(),
             section_number,
             storage_class,
             index: self.symbols.len(),
@@ -200,7 +200,7 @@ impl Coff {
     ) {
         let symbol = self
             .symbol_for_elf_symbol_index
-            .get(&(elf_relocation.r_sym as usize))
+            .get(&(elf_relocation.r_sym.try_into().unwrap()))
             .unwrap();
         let relocation_type = match elf_relocation.r_type {
             // The i386 ABI appears to be the same as the x86_64 ABI for these reloc types
@@ -218,7 +218,7 @@ impl Coff {
         };
         let section = self.section_for_elf_index.get(&elf_section_index).unwrap();
         section.borrow_mut().relocations.push(Relocation {
-            address: elf_relocation.r_offset as u32,
+            address: elf_relocation.r_offset.try_into().unwrap(),
             symbol: symbol.clone(),
             relocation_type,
         });
@@ -233,7 +233,7 @@ impl Coff {
 
         // Keep track of where the data for each section will start, beginning after the headers
         let mut data_offset =
-            (CoffFileHeader::SIZE + CoffSectionHeader::SIZE * self.sections.len()) as u32;
+            u32::try_from(CoffFileHeader::SIZE + CoffSectionHeader::SIZE * self.sections.len()).unwrap();
 
         // Write the COFF headers
         let file_header = CoffFileHeader::from_coff(self);
@@ -243,12 +243,12 @@ impl Coff {
             let section = section.borrow();
             let section_header = CoffSectionHeader::from_section(&section, data_offset);
             section_header.serialize(&mut writer)?;
-            expected_section_offsets.push(data_offset as usize);
+            expected_section_offsets.push(data_offset.try_into().unwrap());
             if section.section_type != CoffSectionType::Bss {
                 // BSS sections are not stored in the file
                 data_offset += section.size;
             }
-            data_offset += (CoffRelocation::SIZE * section.relocations.len()) as u32;
+            data_offset += u32::try_from(CoffRelocation::SIZE * section.relocations.len()).unwrap();
             // TODO: lineno offset
         }
 
@@ -276,9 +276,9 @@ impl Coff {
             let mut copy_ofs: usize = 0;
             for reloc in &section.relocations {
                 if reloc.relocation_type == CoffRelocationType::Relative {
-                    writer.write_bytes(&data[copy_ofs..reloc.address as usize])?;
-                    copy_ofs = reloc.address as usize + 4;
-                    let rel_to_start = -(copy_ofs as i32);
+                    writer.write_bytes(&data[copy_ofs..reloc.address.try_into().unwrap()])?;
+                    copy_ofs = (reloc.address + 4).try_into().unwrap();
+                    let rel_to_start = -i32::try_from(copy_ofs).unwrap();
                     writer.write_i32(rel_to_start)?;
                 }
             }
@@ -298,7 +298,7 @@ impl Coff {
         }
 
         // Write the string table length as a u32 before dumping all the strings
-        writer.write_u32((self.strings.contents.len() + STRING_TABLE_BASE_OFFSET) as u32)?;
+        writer.write_u32((self.strings.contents.len() + STRING_TABLE_BASE_OFFSET).try_into().unwrap())?;
         writer.write_bytes(self.strings.contents.as_slice())?;
 
         Ok(())
@@ -442,7 +442,7 @@ impl StringTable {
     }
 
     pub fn add(&mut self, s: &[u8]) -> StringTableOffset {
-        let index = (self.contents.len() + STRING_TABLE_BASE_OFFSET) as StringTableOffset;
+        let index = StringTableOffset::try_from(self.contents.len() + STRING_TABLE_BASE_OFFSET).unwrap();
         self.contents.extend(s.iter());
         self.contents.push(0);
         self.string_offsets.insert(s.to_vec(), index);
@@ -450,7 +450,7 @@ impl StringTable {
     }
 
     pub fn get_string(&self, offset: StringTableOffset) -> &[u8] {
-        let offset_to_end = &self.contents[offset as usize..];
+        let offset_to_end = &self.contents[usize::try_from(offset).unwrap()..];
         if let Some(end) = offset_to_end.iter().position(|&c| c == 0) {
             &offset_to_end[..end]
         } else {

@@ -24,7 +24,7 @@ impl CoffFileHeader {
         for section in coff.sections.iter() {
             let section = section.borrow();
             header_and_sections_len += CoffSectionHeader::SIZE;
-            header_and_sections_len += section.size_on_disk() as usize;
+            header_and_sections_len += usize::try_from(section.size_on_disk()).unwrap();
             header_and_sections_len += CoffRelocation::SIZE * section.relocations.len();
             // TODO: line nums
         }
@@ -45,13 +45,13 @@ impl CoffFileHeader {
 
         Self {
             magic: COFF_MAGIC.clone(),
-            num_sections: coff.sections.len() as u16,
+            num_sections: coff.sections.len().try_into().unwrap(),
             timestamp: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
-                .as_secs() as u32,
-            symbols_ptr: header_and_sections_len as u32,
-            num_symbols: coff.symbols.len() as u32,
+                .as_secs() as _,
+            symbols_ptr: header_and_sections_len.try_into().unwrap(),
+            num_symbols: coff.symbols.len().try_into().unwrap(),
             opt_header_size: 0,
             flags: flags.bits(),
         }
@@ -101,7 +101,7 @@ impl CoffSectionHeader {
 
         let raw_data_ptr = if section.size > 0 { raw_data_offset } else { 0 };
 
-        let num_relocations = section.relocations.len() as u16;
+        let num_relocations = u16::try_from(section.relocations.len()).unwrap();
         let relocations_ptr = if num_relocations > 0 {
             raw_data_offset + section.size_on_disk()
         } else {
@@ -141,7 +141,7 @@ impl CoffSerialize for CoffSectionHeader {
         written += serializer.write_u32(self.line_nums_ptr)?;
         written += serializer.write_u16(self.num_relocations)?;
         written += serializer.write_u16(self.num_line_nums)?;
-        written += serializer.write_u32(self.flags as u32)?;
+        written += serializer.write_u32(self.flags as _)?;
         assert_eq!(written, Self::SIZE);
         Ok(written)
     }
@@ -172,7 +172,7 @@ impl CoffSymbol {
             value: symbol.value,
             section_number: symbol.section_number.bits(),
             symbol_type: 0,
-            storage_class: symbol.storage_class.clone() as u8,
+            storage_class: symbol.storage_class as _,
             num_aux: 0,
         }
     }
@@ -204,8 +204,8 @@ impl CoffRelocation {
     pub fn from_relocation(reloc: &Relocation) -> Self {
         Self {
             address: reloc.address,
-            symbol_idx: reloc.symbol.borrow().index as u32,
-            relocation_type: reloc.relocation_type as u16,
+            symbol_idx: reloc.symbol.borrow().index.try_into().unwrap(),
+            relocation_type: reloc.relocation_type as _,
         }
     }
 }

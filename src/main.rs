@@ -240,7 +240,7 @@ fn get_elf_sections_to_process<S: Read + Seek>(
                 return None;
             }
             // Determine the COFF section type by name prefix
-            let name = strtab.get(sh.sh_name as usize).unwrap();
+            let name = strtab.get(sh.sh_name.try_into().unwrap()).unwrap();
             let section_type = ELF_SECTION_TYPE_PREFIXES
                 .iter()
                 .find(|(prefix, _)| name.starts_with(prefix))
@@ -310,14 +310,14 @@ pub fn get_section_number_for_symbol_indexes<S: Read + Seek>(
     for (symbol_idx, symbol) in elf_symbol_table.iter().enumerate() {
         if symbol.st_shndx != SHN_XINDEX {
             // Normal section index
-            result.push(symbol.st_shndx as usize)
+            result.push(symbol.st_shndx.into())
         } else {
             // Extended section index
             match &ext_section_indexes {
                 None => panic!("Symbol {symbol_idx} has section SHN_XINDEX, but no SHT_SYMTAB_SHNDX section exists"),
                 Some(esi) => {
                     if let Some(section_idx) = esi.get(symbol_idx) {
-                        result.push(*section_idx as usize);
+                        result.push((*section_idx).try_into().unwrap());
                     } else {
                         panic!("SHT_SYMTAB_SHNDX section missing entry for symbol {symbol_idx}")
                     }
@@ -337,7 +337,7 @@ pub fn get_elf_rel_sections<S: Read + Seek>(
         .iter()
         .filter_map(|sh| match sh.sh_type {
             SHT_REL => Some((
-                strtab.get(sh.sh_name as usize).unwrap().to_owned(),
+                strtab.get(sh.sh_name.try_into().unwrap()).unwrap().to_owned(),
                 sh.clone(),
             )),
             _ => None,
