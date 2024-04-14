@@ -166,14 +166,15 @@ fn convert<S: Read + Seek>(mut binary: &mut ElfStream<LittleEndian, S>) -> Coff 
     let mut coff = Coff::new();
 
     // Add all the sections
-    let sections = get_elf_sections_to_process(&mut binary);
-    for section in sections.values() {
+    let mut sections = HashMap::new();
+    for (name, section) in get_elf_sections_to_process(&mut binary) {
         coff.add_elf_section(
             binary,
             &section.section_header,
             section.elf_index,
             section.section_type,
         );
+        sections.insert(name, section);
     }
 
     // Add all the symbols
@@ -226,7 +227,7 @@ fn convert<S: Read + Seek>(mut binary: &mut ElfStream<LittleEndian, S>) -> Coff 
 
 fn get_elf_sections_to_process<S: Read + Seek>(
     binary: &mut ElfStream<LittleEndian, S>,
-) -> HashMap<String, ElfSectionToProcess> {
+) -> Vec <(String, ElfSectionToProcess)> {
     let (section_headers, maybe_strtab) = binary
         .section_headers_with_strtab()
         .expect("Failed to read symbol table");
