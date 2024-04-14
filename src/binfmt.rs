@@ -122,7 +122,7 @@ impl CoffSectionHeader {
             line_nums_ptr,
             num_relocations,
             num_line_nums,
-            flags: CoffSectionType::Unknown,
+            flags: section.section_type,
         }
     }
 }
